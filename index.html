@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+
+<html lang="pt-br">
+
+<head>
+
+<meta charset="UTF-8">
+<title>Radar de Faturamento Medlevensohn</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<style>
+
+body{
+font-family:Segoe UI;
+margin:0;
+background:#f4faf6;
+}
+
+header{
+background:#0f5132;
+padding:18px 30px;
+display:flex;
+align-items:center;
+position:relative;
+color:white;
+}
+
+.logo{
+height:100px;
+}
+
+.titulo{
+position:absolute;
+left:50%;
+transform:translateX(-50%);
+font-size:50px;
+font-weight:700;
+letter-spacing:1px;
+margin:0;
+}
+
+.container{
+padding:25px;
+}
+
+.filters{
+display:flex;
+flex-wrap:wrap;
+gap:12px;
+margin-bottom:20px;
+}
+
+select{
+padding:8px;
+border-radius:6px;
+border:1px solid #ccc;
+min-width:200px;
+}
+
+button{
+background:#198754;
+color:white;
+border:none;
+padding:8px 14px;
+border-radius:6px;
+cursor:pointer;
+}
+
+.kpis{
+display:grid;
+grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+gap:20px;
+margin-bottom:25px;
+}
+
+.kpi{
+  background:white;
+  padding:20px;
+  border-radius:10px;
+  box-shadow:0 3px 8px rgba(0,0,0,0.08);
+  text-align:center;
+
+  height:120px;              
+  display:flex;              
+  flex-direction:column;
+  justify-content:center;
+}
+.kpi h2{
+color:#0f5132;
+}
+
+.yoy{
+font-weight:600;
+margin-top:6px;
+}
+
+.up{color:#2e7d32}
+.down{color:#c62828}
+
+.grid{
+display:grid;
+grid-template-columns:1fr 1fr;
+gap:25px;
+margin-bottom:25px;
+}
+
+.card{
+background:white;
+padding:20px;
+border-radius:10px;
+box-shadow:0 3px 8px rgba(0,0,0,0.08);
+display:flex;
+justify-content:center;
+align-items:center;
+}
+
+canvas{
+height:340px !important;
+}
+
+#regioes{
+max-width:450px;
+margin:auto;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<header>
+
+<img src="logo_medlevensohn.png" class="logo">
+
+<h2 class="titulo">Radar de Faturamento Medlevensohn</h2>
+
+</header>
+
+<div class="container">
+
+<div class="filters">
+
+<input type="file" id="upload">
+
+<select id="mesFiltro" multiple></select> <select id="tipoDoc" multiple></select> <select id="canal" multiple></select> <select id="setor" multiple></select> <select id="regiao" multiple></select>
+
+<button onclick="limparFiltros()">Limpar filtros</button>
+
+</div>
+
+<div class="kpis">
+
+<div class="kpi">
+Faturamento Total
+<h2 id="fat"></h2>
+<div id="fatYoY" class="yoy"></div>
+</div>
+
+<div class="kpi">
+Meta Anual
+<h2 id="metaAnual"></h2>
+<div id="metaPercent"></div>
+</div>
+
+<div class="kpi" id="kpiPrecoMedio" title="">
+Preço Médio
+<h2 id="media"></h2>
+</div>
+
+<div class="kpi" id="kpiMargem">
+Margem Bruta
+<h2 id="margem"></h2>
+</div>
+
+<div class="kpi">
+Clientes
+<h2 id="clientes"></h2>
+</div>
+
+<div class="kpi">
+Produtos
+<h2 id="produtos"></h2>
+</div>
+
+</div>
+
+<div class="grid">
+
+<div class="card">
+<canvas id="faturamentoMes"></canvas>
+</div>
+
+<div class="card">
+<canvas id="topProdutos"></canvas>
+</div>
+
+</div>
+
+<div class="grid">
+
+<div class="card">
+<canvas id="regioes"></canvas>
+</div>
+
+<div class="card">
+<canvas id="rankingClientes"></canvas>
+</div>
+
+</div>
+
+</div>
+
+<script>
+
+const META_ANUAL = 506000000
+
+let dados=[]
+let charts=[]
+
+document.getElementById("upload").addEventListener("change",function(e){
+
+let reader=new FileReader()
+
+reader.onload=function(e){
+
+let data=new Uint8Array(e.target.result)
+
+let workbook=XLSX.read(data,{type:'array'})
+let sheet=workbook.Sheets[workbook.SheetNames[0]]
+
+let json=XLSX.utils.sheet_to_json(sheet)
+
+dados=json.map(r=>{
+
+let dataExcel=r["Data do faturamento"]
+
+let dataJS = typeof dataExcel==="number"
+? new Date((dataExcel-25569)*86400*1000)
+: new Date(dataExcel)
+
+let mesTexto=dataJS.toLocaleDateString("pt-BR",{month:"short",year:"numeric"})
+
+return{
+data:dataJS,
+ano:dataJS.getFullYear(),
+mes:dataJS.getMonth(),
+mesLabel:mesTexto,
+
+tp:r["Tp.doc.faturamento"],
+canal:r["Denominação Canal Distribuição"],
+setor:r["Denominação Setor Atividade"],
+regiao:r["Descrição de região de vendas"],
+cliente:r["Nome"],
+produto:r["Denominação de item"],
+
+qtd:Number(r["Quantidade faturada"])||0,
+valor:Number(r["Valor bruto"])||0,
+custo:Number(r["Preço médio móvel"])||0 // CORRIGIDO AQUI
+
+
+}
+
+})
+
+popularFiltros()
+atualizarDashboard()
+
+}
+
+reader.readAsArrayBuffer(e.target.files[0])
+
+})
+
+function popularFiltros(){
+
+criarFiltro("mesFiltro","mesLabel")
+criarFiltro("tipoDoc","tp")
+criarFiltro("canal","canal")
+criarFiltro("setor","setor")
+criarFiltro("regiao","regiao")
+
+}
+
+function criarFiltro(id,col){
+
+let valores=[...new Set(dados.map(d=>d[col]).filter(v=>v))]
+
+let select=document.getElementById(id)
+
+select.innerHTML=""
+
+valores.sort().forEach(v=>{
+
+let opt=document.createElement("option")
+opt.value=v
+opt.text=v
+select.appendChild(opt)
+
+})
+
+select.addEventListener("change",atualizarDashboard)
+
+}
+
+function limparFiltros(){
+
+document.querySelectorAll("select").forEach(s=>s.selectedIndex=-1)
+atualizarDashboard()
+
+}
+
+function dadosFiltrados(){
+
+let mes=[...mesFiltro.selectedOptions].map(o=>o.value)
+let tipo=[...tipoDoc.selectedOptions].map(o=>o.value)
+let canalF=[...canal.selectedOptions].map(o=>o.value)
+let setorF=[...setor.selectedOptions].map(o=>o.value)
+let regiaoF=[...regiao.selectedOptions].map(o=>o.value)
+
+return dados.filter(d=>
+
+(!mes.length||mes.includes(d.mesLabel)) &&
+(!tipo.length||tipo.includes(d.tp)) &&
+(!canalF.length||canalF.includes(d.canal)) &&
+(!setorF.length||setorF.includes(d.setor)) &&
+(!regiaoF.length||regiaoF.includes(d.regiao))
+
+)
+
+}
+
+function calcularKPIs(d){
+
+let total=d.reduce((a,b)=>a+b.valor,0)
+let qtd=d.reduce((a,b)=>a+b.qtd,0)
+let custoTotal=d.reduce((a,b)=>a+b.custo,0) // NOVO
+let margemBruta = total - custoTotal // NOVO
+
+let preco = qtd>0 ? total/qtd : 0
+
+document.getElementById("fat").innerHTML=
+total.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})
+
+document.getElementById("metaAnual").innerHTML=
+META_ANUAL.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})
+
+let percentualMeta=(total/META_ANUAL)*100
+
+document.getElementById("metaPercent").innerHTML=
+percentualMeta.toFixed(1)+"% da meta anual"
+
+document.getElementById("media").innerHTML=
+preco.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})
+
+document.getElementById("clientes").innerHTML=
+[...new Set(d.map(x=>x.cliente))].length
+
+document.getElementById("produtos").innerHTML=
+[...new Set(d.map(x=>x.produto))].length
+
+// NOVO KPI
+document.getElementById("margem").innerHTML=
+margemBruta.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})
+
+// TOOLTIP DA MARGEM
+document.getElementById("kpiMargem").title =
+"Margem Bruta = Valor Total da Venda - Custo Média Móvel da Mercadoria Vendida\n\n"+
+"Valor Total: "+total.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})+"\n"+
+"Custo Total: "+custoTotal.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})+"\n"+
+"Margem Bruta: "+margemBruta.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})
+
+
+let meses={}
+
+d.forEach(r=>{
+let chave=r.ano+"-"+r.mes
+if(!meses[chave])meses[chave]=0
+meses[chave]+=r.valor
+})
+
+let ordenado=Object.entries(meses).sort()
+
+let atual=ordenado[ordenado.length-1]?.[1]||0
+let anterior=ordenado[ordenado.length-2]?.[1]||0
+
+let yoy=0
+
+if(anterior>0){
+yoy=((atual-anterior)/anterior)*100
+}
+
+let classe=yoy>=0?"up":"down"
+let seta=yoy>=0?"▲":"▼"
+
+document.getElementById("fatYoY").innerHTML=
+`<span class="${classe}">
+${seta} ${yoy.toFixed(1)}% vs mês anterior
+</span>`
+
+document.getElementById("kpiPrecoMedio").title =
+"Preço Médio = Valor Total ÷ Quantidade Total\n\n"+
+"Valor Total: "+total.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})+"\n"+
+"Quantidade: "+qtd+"\n"+
+"Preço Médio: "+preco.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})
+
+}
+
+function graficoMes(d){
+
+let meses={}
+
+d.forEach(r=>{
+if(!meses[r.mesLabel])meses[r.mesLabel]=0
+meses[r.mesLabel]+=r.valor
+})
+
+charts.push(new Chart(
+document.getElementById("faturamentoMes"),
+{
+type:"bar",
+data:{
+labels:Object.keys(meses),
+datasets:[{
+label:"Faturamento mensal",
+data:Object.values(meses),
+backgroundColor:"#198754"
+}]
+},
+plugins:[ChartDataLabels],
+options:{
+plugins:{
+datalabels:{
+anchor:"end",
+align:"top",
+formatter:(v)=>v.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})
+}
+}
+}
+}
+))
+
+}
+
+function graficoProdutos(d){
+
+let prod={}
+
+d.forEach(r=>{
+if(!prod[r.produto])prod[r.produto]=0
+prod[r.produto]+=r.qtd
+})
+
+let ordenado=Object.entries(prod)
+.sort((a,b)=>b[1]-a[1])
+.slice(0,10)
+
+let labels=ordenado.map(x=>x[0])
+let valores=ordenado.map(x=>x[1])
+
+charts.push(new Chart(
+document.getElementById("topProdutos"),
+{
+type:"bar",
+data:{
+labels:labels,
+datasets:[{
+label:"Top 10 Produtos",
+data:valores,
+backgroundColor:"#20c997"
+}]
+}
+}
+))
+
+}
+
+function graficoRegioes(d){
+
+let reg={}
+
+d.forEach(r=>{
+if(!reg[r.regiao])reg[r.regiao]=0
+reg[r.regiao]+=r.valor
+})
+
+let labels=Object.keys(reg)
+let valores=Object.values(reg)
+
+let total=valores.reduce((a,b)=>a+b,0)
+
+charts.push(new Chart(
+document.getElementById("regioes"),
+{
+type:"doughnut",
+data:{
+labels:labels,
+datasets:[{
+data:valores,
+backgroundColor:[
+"#0f5132",
+"#198754",
+"#20c997",
+"#4CAF50",
+"#81C784"
+]
+}]
+},
+plugins:[ChartDataLabels],
+options:{
+plugins:{
+datalabels:{
+color:"#ffffff",
+font:{weight:"bold",size:14},
+formatter:(value)=>{
+let percentual=(value/total*100).toFixed(1)
+return percentual+"%"
+}
+}
+}
+}
+}
+))
+
+}
+
+function rankingClientes(d){
+
+let cli={}
+
+d.forEach(r=>{
+if(!cli[r.cliente])cli[r.cliente]=0
+cli[r.cliente]+=r.valor
+})
+
+let ordenado=Object.entries(cli)
+.sort((a,b)=>b[1]-a[1])
+.slice(0,10)
+
+let labels=ordenado.map(x=>x[0])
+let valores=ordenado.map(x=>x[1])
+
+charts.push(new Chart(
+document.getElementById("rankingClientes"),
+{
+type:"bar",
+data:{
+labels:labels,
+datasets:[{
+label:"Top 10 Clientes",
+data:valores,
+backgroundColor:"#4CAF50"
+}]
+}
+}
+))
+
+}
+
+function atualizarDashboard(){
+
+let d=dadosFiltrados()
+
+charts.forEach(c=>c.destroy())
+charts=[]
+
+calcularKPIs(d)
+
+graficoMes(d)
+graficoProdutos(d)
+graficoRegioes(d)
+rankingClientes(d)
+
+}
+
+</script>
+
+</body>
+</html>
