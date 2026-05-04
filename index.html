@@ -223,6 +223,18 @@ const META_ANUAL = 506000000
 let dados=[]
 let charts=[]
 
+window.onload = function(){
+
+let salvo = localStorage.getItem("dadosExcel")
+
+if(salvo){
+dados = JSON.parse(salvo)
+popularFiltros()
+atualizarDashboard()
+}
+
+}
+
 document.getElementById("upload").addEventListener("change",function(e){
 
 let reader=new FileReader()
@@ -267,6 +279,8 @@ custo:Number(r["Preço médio móvel"])||0 // CORRIGIDO AQUI
 }
 
 })
+
+localStorage.setItem("dadosExcel", JSON.stringify(dados))
 
 popularFiltros()
 atualizarDashboard()
